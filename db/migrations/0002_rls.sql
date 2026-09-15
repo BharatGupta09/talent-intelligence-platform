@@ -351,6 +351,38 @@ create policy users_auth_read on users for select
 create policy users_auth_insert on users for insert
   with check (current_setting('app.auth_op', true) = 'on');
 
+-- Registration also writes the profile, and the candidate profile for
+-- candidates. Under Supabase this was done by the handle_new_user() trigger,
+-- which was SECURITY DEFINER and therefore bypassed RLS entirely. That trigger
+-- is gone (it fired on a managed auth table that no longer exists), so the
+-- equivalent permission is granted here — scoped to the same transaction-local
+-- auth flag, so only the registration path can use it.
+--
+-- Without these, registration fails with "new row violates row-level security
+-- policy" the moment the application stops connecting as a BYPASSRLS role.
+create policy profiles_auth_insert on profiles for insert
+  with check (current_setting('app.auth_op', true) = 'on');
+
+create policy candprofile_auth_insert on candidate_profiles for insert
+  with check (current_setting('app.auth_op', true) = 'on');
+
+-- The auth path must also READ these two tables, for two reasons that both
+-- surfaced only once RLS was genuinely enforced:
+--
+--   1. authenticate() joins profiles to resolve role and is_active. With no
+--      identity established yet, profiles_self_read cannot match, so sign-in
+--      would return no rows and every password would appear wrong.
+--   2. INSERT ... ON CONFLICT DO NOTHING requires the SELECT policy in order to
+--      evaluate the arbiter, so registration fails with an RLS violation even
+--      though the INSERT policy above permits the write.
+--
+-- Scoped to the same transaction-local flag, so only lib/auth can use it.
+create policy profiles_auth_read on profiles for select
+  using (current_setting('app.auth_op', true) = 'on');
+
+create policy candprofile_auth_read on candidate_profiles for select
+  using (current_setting('app.auth_op', true) = 'on');
+
 create policy users_auth_update on users for update
   using (current_setting('app.auth_op', true) = 'on')
   with check (current_setting('app.auth_op', true) = 'on');

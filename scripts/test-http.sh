@@ -1,5 +1,5 @@
 set -u
-cd /home/claude/talentiq
+cd "$(dirname "$0")/.."
 nohup npx next start -p 3000 > /tmp/server.log 2>&1 &
 SRV=$!
 for i in $(seq 1 30); do
