@@ -1,5 +1,6 @@
 import 'server-only';
 import type { PoolClient } from '@neondatabase/serverless';
+import { parseSelect, buildEmbeds } from './embed';
 
 /**
  * A deliberately small PostgREST-compatible query builder.
@@ -21,9 +22,12 @@ import type { PoolClient } from '@neondatabase/serverless';
  *   single() · maybeSingle()
  *   select(cols, { count: 'exact', head: true })
  *
+ * Embedded resources are supported for the to-one relationships declared in
+ * lib/db/relationships.ts, including two levels of nesting and `!inner`.
+ * See lib/db/embed.ts.
+ *
  * Notably NOT implemented, because nothing uses them: or(), neq(), gt(), lt(),
- * like/ilike, contains, ranges, column aliasing, and embedded resources. The
- * ten embedded selects are hand-written SQL in lib/db/queries.ts.
+ * like/ilike, contains, ranges, column aliasing, and to-many embedding.
  */
 
 /* ------------------------------------------------------------------ */
@@ -72,13 +76,38 @@ function ident(name: string): string {
  */
 const FORBIDDEN_TABLES = new Set(['users']);
 
-function columnList(select: string): string {
+/**
+ * Renders the SELECT list for `table`, including any embedded resources.
+ * Returns the projection plus any WHERE conditions `!inner` embeds require.
+ */
+function projection(table: string, select: string): {
+  columns: string;
+  whereConditions: string[];
+} {
+  const spec = select.trim();
+  if (spec === '*') return { columns: '*', whereConditions: [] };
+
+  const parsed = parseSelect(spec);
+  const parts = parsed.columns.map((c) => (c === '*' ? '*' : ident(c)));
+
+  if (parsed.embeds.length === 0) {
+    return { columns: parts.join(', '), whereConditions: [] };
+  }
+
+  const { selectExpressions, whereConditions } = buildEmbeds(table, parsed.embeds);
+  return {
+    columns: [...parts, ...selectExpressions].join(', '),
+    whereConditions,
+  };
+}
+
+/** Column list for RETURNING, where embedded resources are not meaningful. */
+function returningList(select: string): string {
   const spec = select.trim();
   if (spec === '*') return '*';
   if (spec.includes('(')) {
     throw new Error(
-      `Embedded selects are not supported by the compatibility layer: ` +
-      `${JSON.stringify(select)}. Use the hand-written query in lib/db/queries.ts.`,
+      `Embedded selects are not supported in a RETURNING clause: ${JSON.stringify(select)}`,
     );
   }
   if (spec.includes(':')) {
@@ -229,8 +258,8 @@ export class QueryBuilder<Row = any, Out = Row[] | null>
 
   /* -------------------------------------------------- SQL */
 
-  private where(values: unknown[]): string {
-    if (this.filters.length === 0) return '';
+  private where(values: unknown[], extra: string[] = []): string {
+    if (this.filters.length === 0 && extra.length === 0) return '';
     const parts = this.filters.map((f) => {
       const col = ident(f.column);
       if (f.kind === 'is') return `${col} is null`;
@@ -242,7 +271,7 @@ export class QueryBuilder<Row = any, Out = Row[] | null>
       const opSql = f.kind === 'eq' ? '=' : f.kind === 'gte' ? '>=' : '<=';
       return `${col} ${opSql} $${values.push(f.value)}`;
     });
-    return ` where ${parts.join(' and ')}`;
+    return ` where ${[...parts, ...extra].join(' and ')}`;
   }
 
   private tail(values: unknown[]): string {
@@ -262,14 +291,20 @@ export class QueryBuilder<Row = any, Out = Row[] | null>
     const values: unknown[] = [];
 
     if (this.op === 'select') {
-      const cols = this.headOnly ? '1' : columnList(this.selection);
-      const text = `select ${cols} from ${t}${this.where(values)}${this.tail(values)}`;
+      if (this.headOnly) {
+        const text = `select 1 from ${t}${this.where(values)}${this.tail(values)}`;
+        return { text, values };
+      }
+      const { columns, whereConditions } = projection(this.table, this.selection);
+      const text =
+        `select ${columns} from ${t}` +
+        `${this.where(values, whereConditions)}${this.tail(values)}`;
       return { text, values };
     }
 
     if (this.op === 'delete') {
       const returning = this.wantsReturning
-        ? ` returning ${columnList(this.selection)}`
+        ? ` returning ${returningList(this.selection)}`
         : '';
       return { text: `delete from ${t}${this.where(values)}${returning}`, values };
     }
@@ -279,7 +314,7 @@ export class QueryBuilder<Row = any, Out = Row[] | null>
       if (keys.length === 0) throw new Error('update() called with no columns.');
       const sets = keys.map((k) => `${ident(k)} = $${values.push(this.updates[k])}`);
       const returning = this.wantsReturning
-        ? ` returning ${columnList(this.selection)}`
+        ? ` returning ${returningList(this.selection)}`
         : '';
       return {
         text: `update ${t} set ${sets.join(', ')}${this.where(values)}${returning}`,
@@ -315,7 +350,7 @@ export class QueryBuilder<Row = any, Out = Row[] | null>
         ? ` on conflict (${target}) do update set ${assignments.join(', ')}`
         : ` on conflict (${target}) do nothing`;
     }
-    if (this.wantsReturning) text += ` returning ${columnList(this.selection)}`;
+    if (this.wantsReturning) text += ` returning ${returningList(this.selection)}`;
     return { text, values };
   }
 

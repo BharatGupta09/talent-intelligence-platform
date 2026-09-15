@@ -1,5 +1,5 @@
 import 'server-only';
-import { Pool, neonConfig } from '@neondatabase/serverless';
+import { Pool, neonConfig, types } from '@neondatabase/serverless';
 
 /**
  * Neon connection pool.
@@ -20,6 +20,28 @@ import { Pool, neonConfig } from '@neondatabase/serverless';
 if (typeof globalThis.WebSocket !== 'undefined') {
   neonConfig.webSocketConstructor = globalThis.WebSocket;
 }
+
+/**
+ * NUMERIC arrives as a JavaScript number, not a string.
+ *
+ * MIGRATION NOTE: node-postgres decodes `numeric` (OID 1700) as a string by
+ * default, to avoid losing precision on values wider than a float64. PostgREST
+ * did not do that — it emitted JSON numbers — so every caller in this codebase
+ * is written against numbers (`overall: number`, `years_experience: number`).
+ *
+ * Without this, the same column would arrive as two different types depending
+ * on how it was read: a string when selected directly, but a number when read
+ * through an embedded resource, because jsonb_build_object produces a real JSON
+ * number. That inconsistency is worse than either choice on its own.
+ *
+ * Safe here because every numeric column in this schema is small and bounded:
+ *   application_scores.overall        numeric(5,2)
+ *   candidate_profiles.years_experience numeric(4,1)
+ *   jobs.experience_min / experience_max numeric(4,1)
+ * All are represented exactly by a float64. Adding a wide numeric column later
+ * (money, large counters) would require revisiting this.
+ */
+types.setTypeParser(1700, (value: string) => Number(value));
 
 declare global {
   // eslint-disable-next-line no-var

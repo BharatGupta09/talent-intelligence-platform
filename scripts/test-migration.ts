@@ -155,9 +155,14 @@ async function main() {
     check('a column name with SQL in it is rejected',
       bad.error !== null && bad.error.code === 'TIP_BUILD', JSON.stringify(bad.error));
 
-    const nested = await qb('applications').select('id, jobs(title)');
-    check('embedded selects are refused, not silently mistranslated',
-      nested.error !== null && /Embedded selects/.test(nested.error.message), JSON.stringify(nested.error));
+    // Phase 2 note: declared embeds are now supported (see test-embed.ts).
+    // What must stay refused is an embed the relationship map does not declare,
+    // because guessing a join is how a compatibility layer silently returns the
+    // wrong rows.
+    const undeclared = await qb('applications').select('id, resumes(file_name)');
+    check('an undeclared embed is refused, not guessed',
+      undeclared.error !== null && /No declared relationship/.test(undeclared.error.message),
+      JSON.stringify(undeclared.error));
 
     let threw = false;
     try { qb('users'); } catch { threw = true; }

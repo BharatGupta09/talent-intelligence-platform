@@ -13,9 +13,10 @@
     "test:authz": "tsx scripts/test-authz.ts",
     "test:pdf": "tsx --conditions=react-server scripts/test-pdf.ts",
     "test:ai": "tsx --conditions=react-server scripts/test-ai.ts",
-    "test": "npm run test:scoring && npm run test:authz && npm run test:pdf && npm run test:ai && npm run test:migration",
+    "test": "npm run test:scoring && npm run test:authz && npm run test:pdf && npm run test:ai && npm run test:migration && npm run test:embed",
     "test:http": "bash scripts/test-http.sh",
-    "test:migration": "tsx --conditions=react-server scripts/test-migration.ts"
+    "test:migration": "tsx --conditions=react-server scripts/test-migration.ts",
+    "test:embed": "tsx --conditions=react-server scripts/test-embed.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1132.0",
