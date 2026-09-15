@@ -10,22 +10,20 @@
  * same prompts a live application uses — so seeded scores are genuine
  * outputs, not hand-written numbers.
  *
- * Usage:  npx tsx scripts/seed.ts
- * Requires NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, GROQ_API_KEY.
+ * Usage:  npx tsx --conditions=react-server --env-file=.env.local scripts/seed.ts
+ * Requires DATABASE_URL, AUTH_JWT_SECRET and GROQ_API_KEY.
  */
 
-import { createClient } from '@supabase/supabase-js';
+import { serviceClient } from '../lib/db';
+import { registerUser, setPassword } from '../lib/auth/users';
 import { randomUUID } from 'node:crypto';
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-if (!url || !serviceKey) {
-  console.error('Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY before seeding.');
+if (!process.env.DATABASE_URL || !process.env.AUTH_JWT_SECRET) {
+  console.error('Set DATABASE_URL and AUTH_JWT_SECRET before seeding.');
   process.exit(1);
 }
 
-const db = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
+const db = serviceClient();
 
 /* ------------------------------------------------------------------ */
 /* Accounts                                                            */
@@ -378,25 +376,31 @@ async function main() {
   const userIds = new Map<string, string>();
   for (const acct of ACCOUNTS) {
     const password = passwordFor(acct.role === 'candidate' ? 'candidate' : acct.role);
-    const { data: created, error } = await db.auth.admin.createUser({
+    // MIGRATION NOTE: replaces db.auth.admin.createUser(). registerUser()
+    // creates the credential row, the profile and (for candidates) the
+    // candidate profile in one transaction — the work the auth trigger used
+    // to do. Re-running the seed resets the password rather than failing.
+    const created = await registerUser({
       email: acct.email,
       password,
-      email_confirm: true,
-      user_metadata: { role: acct.role, full_name: acct.fullName },
+      fullName: acct.fullName,
+      role: acct.role as 'candidate' | 'recruiter' | 'admin',
     });
 
-    if (error && !/already/i.test(error.message)) throw error;
-
-    let id = created?.user?.id;
-    if (!id) {
-      const { data: list } = await db.auth.admin.listUsers({ perPage: 200 });
-      id = list?.users.find((u) => u.email === acct.email)?.id;
+    let id: string | undefined;
+    if ('id' in created) {
+      id = created.id;
+    } else {
+      await setPassword(acct.email, password);
+      const { data: existing } = await db
+        .from('profiles').select('id').eq('email', acct.email).maybeSingle();
+      id = existing?.id as string | undefined;
     }
     if (!id) throw new Error(`Could not resolve user id for ${acct.email}`);
 
     userIds.set(acct.email, id);
 
-    // The auth trigger creates the profile; make role and name authoritative.
+    // registerUser creates the profile; make role and name authoritative.
     await db.from('profiles').upsert({
       id, email: acct.email, full_name: acct.fullName, role: acct.role, is_active: true,
     }, { onConflict: 'id' });

@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 
 export function LoginForm() {
   const router = useRouter();
@@ -16,13 +15,15 @@ export function LoginForm() {
     setBusy(true);
     setError(null);
 
-    const supabase = createClient();
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: email.trim().toLowerCase(),
-      password,
+    // MIGRATION NOTE: credentials go to the server now. The browser never
+    // holds a database key, and the session arrives as an httpOnly cookie.
+    const res = await fetch('/api/auth/signin', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
     });
 
-    if (signInError) {
+    if (!res.ok) {
       // Deliberately does not distinguish "no such account" from "wrong
       // password" - that difference is an account-enumeration oracle.
       setError('That email and password combination was not recognised.');

@@ -1,6 +1,7 @@
 import 'server-only';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { currentUserId } from '@/lib/auth/session';
 
 /**
  * Authorization guards.
@@ -33,14 +34,19 @@ export class AuthzError extends Error {
 
 /** Returns the signed-in user, or null. Never throws. */
 export async function getSessionUser(): Promise<SessionUser | null> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  // MIGRATION NOTE: identity now comes from the signed session cookie rather
+  // than Supabase Auth. Everything after this point is unchanged — role and
+  // active status are still read from `profiles` on every request, so a
+  // deactivated or re-roled user is caught immediately rather than at token
+  // expiry.
+  const userId = await currentUserId();
+  if (!userId) return null;
 
+  const supabase = await createClient();
   const { data: profile } = await supabase
     .from('profiles')
     .select('id, email, role, full_name, is_active')
-    .eq('id', user.id)
+    .eq('id', userId)
     .single();
 
   if (!profile || !profile.is_active) return null;

@@ -9,9 +9,24 @@
 -- SECURITY DEFINER so that reading `profiles` inside a `profiles` policy
 -- does not recurse. STABLE so the planner caches per-statement.
 -- ---------------------------------------------------------------------
+-- ---------------------------------------------------------------------
+-- Request identity.
+-- MIGRATION NOTE: replaces the Supabase app_user_id() function. The
+-- application issues, on every authenticated request:
+--     BEGIN; SET LOCAL app.user_id = '<uuid>'; ...; COMMIT;
+-- SET LOCAL is transaction-scoped, so a pooled connection cannot carry
+-- one request's identity into the next. The `true` second argument makes
+-- a missing setting return NULL instead of raising, so an unauthenticated
+-- request yields NULL and every policy fails closed.
+-- ---------------------------------------------------------------------
+create or replace function app_user_id() returns uuid
+language sql stable as $$
+  select nullif(current_setting('app.user_id', true), '')::uuid
+$$;
+
 create or replace function auth_role() returns user_role
 language sql stable security definer set search_path = public as $$
-  select role from profiles where id = auth.uid() and is_active
+  select role from profiles where id = app_user_id() and is_active
 $$;
 
 create or replace function is_admin() returns boolean
@@ -26,13 +41,13 @@ $$;
 
 create or replace function my_candidate_id() returns uuid
 language sql stable security definer set search_path = public as $$
-  select id from candidate_profiles where user_id = auth.uid()
+  select id from candidate_profiles where user_id = app_user_id()
 $$;
 
 -- A recruiter owns a job outright.
 create or replace function owns_job(target uuid) returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from jobs where id = target and recruiter_id = auth.uid())
+  select exists (select 1 from jobs where id = target and recruiter_id = app_user_id())
 $$;
 
 -- §13: a recruiter reaches a candidate ONLY through an application to their job.
@@ -41,7 +56,7 @@ language sql stable security definer set search_path = public as $$
   select exists (
     select 1 from applications a
     join jobs j on j.id = a.job_id
-    where a.id = target and j.recruiter_id = auth.uid()
+    where a.id = target and j.recruiter_id = app_user_id()
   )
 $$;
 
@@ -51,7 +66,7 @@ language sql stable security definer set search_path = public as $$
   select exists (
     select 1 from applications a
     join jobs j on j.id = a.job_id
-    where a.candidate_id = target and j.recruiter_id = auth.uid()
+    where a.candidate_id = target and j.recruiter_id = app_user_id()
   )
 $$;
 
@@ -75,10 +90,42 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------
+-- Service access.
+-- MIGRATION NOTE: Supabase's service-role key bypassed RLS outright. Neon has
+-- no equivalent: the application connects as the table owner, and every table
+-- above is FORCE'd, so even the owner is subject to its policies. Rather than
+-- dropping FORCE (which would make an accidental owner-context query a silent
+-- full-table read), the background worker gets one explicit, auditable escape
+-- on the same transaction-scoped GUC mechanism as identity.
+--
+-- Only lib/db/session.ts#runAsService sets this flag, and only the AI queue
+-- drain and admin tooling call it. A normal request never sets it, so a normal
+-- request is still bound by the policies below.
+-- ---------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'profiles','candidate_profiles','candidate_experience','candidate_education',
+    'candidate_projects','candidate_certifications','skills','candidate_skills',
+    'jobs','job_requirements','job_analyses','resumes','resume_analyses',
+    'applications','application_analyses','application_scores','application_events',
+    'recruiter_notes','application_tags','interview_kits','interview_preps',
+    'interview_practice','notifications','ai_jobs','ai_usage','system_events','ai_settings'
+  ] loop
+    execute format(
+      'create policy %I_service on %I for all '
+      'using (current_setting(''app.service_op'', true) = ''on'') '
+      'with check (current_setting(''app.service_op'', true) = ''on'')',
+      t || '_svc', t);
+  end loop;
+end $$;
+
+-- ---------------------------------------------------------------------
 -- profiles
 -- ---------------------------------------------------------------------
 create policy profiles_self_read on profiles for select
-  using (id = auth.uid() or is_admin());
+  using (id = app_user_id() or is_admin());
 
 -- A recruiter may read the identity of candidates who applied to their jobs.
 create policy profiles_recruiter_read_applicants on profiles for select
@@ -90,7 +137,7 @@ create policy profiles_recruiter_read_applicants on profiles for select
   );
 
 create policy profiles_self_update on profiles for update
-  using (id = auth.uid()) with check (id = auth.uid() and role = auth_role());
+  using (id = app_user_id()) with check (id = app_user_id() and role = auth_role());
 
 create policy profiles_admin_all on profiles for all
   using (is_admin()) with check (is_admin());
@@ -99,7 +146,7 @@ create policy profiles_admin_all on profiles for all
 -- candidate_profiles and children  (§94 strict isolation)
 -- ---------------------------------------------------------------------
 create policy cp_owner_all on candidate_profiles for all
-  using (user_id = auth.uid()) with check (user_id = auth.uid());
+  using (user_id = app_user_id()) with check (user_id = app_user_id());
 
 create policy cp_recruiter_read on candidate_profiles for select
   using (is_recruiter() and candidate_visible_to_me(id));
@@ -129,7 +176,7 @@ begin
 end $$;
 
 -- Shared skill vocabulary is readable by any signed-in user; only admin writes.
-create policy skills_read on skills for select using (auth.uid() is not null);
+create policy skills_read on skills for select using (app_user_id() is not null);
 create policy skills_admin_write on skills for all
   using (is_admin()) with check (is_admin());
 
@@ -140,7 +187,7 @@ create policy jobs_public_read on jobs for select
   using (status = 'active');
 
 create policy jobs_owner_all on jobs for all
-  using (recruiter_id = auth.uid()) with check (recruiter_id = auth.uid());
+  using (recruiter_id = app_user_id()) with check (recruiter_id = app_user_id());
 
 create policy jobs_admin_all on jobs for all
   using (is_admin()) with check (is_admin());
@@ -179,7 +226,7 @@ create policy resumes_owner_all on resumes for all
 create policy resumes_recruiter_read on resumes for select
   using (is_recruiter() and exists (
     select 1 from applications a join jobs j on j.id = a.job_id
-    where a.resume_id = resumes.id and j.recruiter_id = auth.uid()
+    where a.resume_id = resumes.id and j.recruiter_id = app_user_id()
   ));
 
 create policy resumes_admin_read on resumes for select using (is_admin());
@@ -189,7 +236,7 @@ create policy ranalysis_owner_read on resume_analyses for select
 create policy ranalysis_recruiter_read on resume_analyses for select
   using (is_recruiter() and exists (
     select 1 from applications a join jobs j on j.id = a.job_id
-    where a.resume_id = resume_analyses.resume_id and j.recruiter_id = auth.uid()
+    where a.resume_id = resume_analyses.resume_id and j.recruiter_id = app_user_id()
   ));
 create policy ranalysis_admin_read on resume_analyses for select using (is_admin());
 
@@ -238,8 +285,8 @@ create policy appevent_admin_all on application_events for all
 
 -- §57: recruiter notes and tags are never visible to candidates. No candidate policy.
 create policy notes_recruiter_all on recruiter_notes for all
-  using (owns_application(application_id) and recruiter_id = auth.uid())
-  with check (owns_application(application_id) and recruiter_id = auth.uid());
+  using (owns_application(application_id) and recruiter_id = app_user_id())
+  with check (owns_application(application_id) and recruiter_id = app_user_id());
 create policy notes_admin_read on recruiter_notes for select using (is_admin());
 
 create policy tags_recruiter_all on application_tags for all
@@ -264,9 +311,9 @@ create policy practice_admin_read on interview_practice for select using (is_adm
 -- ---------------------------------------------------------------------
 -- notifications
 -- ---------------------------------------------------------------------
-create policy notif_owner_read on notifications for select using (user_id = auth.uid());
+create policy notif_owner_read on notifications for select using (user_id = app_user_id());
 create policy notif_owner_update on notifications for update
-  using (user_id = auth.uid()) with check (user_id = auth.uid());
+  using (user_id = app_user_id()) with check (user_id = app_user_id());
 create policy notif_admin_all on notifications for all
   using (is_admin()) with check (is_admin());
 
@@ -277,39 +324,33 @@ create policy notif_admin_all on notifications for all
 create policy aijobs_admin_all on ai_jobs for all using (is_admin()) with check (is_admin());
 create policy aiusage_admin_read on ai_usage for select using (is_admin());
 create policy sysevents_admin_read on system_events for select using (is_admin());
-create policy aisettings_read on ai_settings for select using (auth.uid() is not null);
+create policy aisettings_read on ai_settings for select using (app_user_id() is not null);
 create policy aisettings_admin_write on ai_settings for update
   using (is_admin()) with check (is_admin());
 
 -- ---------------------------------------------------------------------
--- Storage: private resume bucket (§63)
+-- users (credential store)
+-- MIGRATION NOTE: this table did not exist under Supabase; it replaces the
+-- managed auth user table. It holds email and password hash, so no ordinary
+-- request may read it. RLS is enabled AND forced (the application connects
+-- as the table owner on Neon, and FORCE is what stops the owner bypassing
+-- the policies).
+--
+-- The only way in is the authentication path, which opens a transaction and
+-- sets `app.auth_op` for the duration of that statement group. A normal
+-- request never sets it, so every normal request is denied. This is the same
+-- transaction-scoped GUC mechanism used for identity, deliberately: there is
+-- exactly one escape hatch in the system and it is auditable.
 -- ---------------------------------------------------------------------
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('resumes', 'resumes', false, 5242880, array['application/pdf'])
-on conflict (id) do update
-  set public = false,
-      file_size_limit = 5242880,
-      allowed_mime_types = array['application/pdf'];
+alter table users enable row level security;
+alter table users force row level security;
 
--- Objects are keyed  resumes/<auth.uid()>/<resume_id>.pdf
-create policy resume_obj_owner_rw on storage.objects for all
-  to authenticated
-  using (bucket_id = 'resumes' and (storage.foldername(name))[1] = auth.uid()::text)
-  with check (bucket_id = 'resumes' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy users_auth_read on users for select
+  using (current_setting('app.auth_op', true) = 'on');
 
-create policy resume_obj_recruiter_read on storage.objects for select
-  to authenticated
-  using (
-    bucket_id = 'resumes'
-    and is_recruiter()
-    and exists (
-      select 1 from resumes r
-      join applications a on a.resume_id = r.id
-      join jobs j on j.id = a.job_id
-      where r.storage_path = storage.objects.name and j.recruiter_id = auth.uid()
-    )
-  );
+create policy users_auth_insert on users for insert
+  with check (current_setting('app.auth_op', true) = 'on');
 
-create policy resume_obj_admin_read on storage.objects for select
-  to authenticated
-  using (bucket_id = 'resumes' and is_admin());
+create policy users_auth_update on users for update
+  using (current_setting('app.auth_op', true) = 'on')
+  with check (current_setting('app.auth_op', true) = 'on');

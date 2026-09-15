@@ -39,9 +39,31 @@ export function ResumeWorkspace({ resume, analysis }: {
   const upload = useCallback(async (file: File) => {
     setUploading(true); setError(null); setNotice(null);
     try {
-      const body = new FormData();
-      body.append('file', file);
-      const res = await fetch('/api/resumes/upload', { method: 'POST', body });
+      // MIGRATION NOTE: two steps now. The file goes straight to storage on a
+      // presigned URL, so it never passes through a serverless function and
+      // the 5 MB limit survives the platform's 4.5 MB request body cap.
+      const presign = await fetch('/api/resumes/upload', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          fileName: file.name, fileSize: file.size, contentType: file.type,
+        }),
+      });
+      const ticket = await presign.json();
+      if (!presign.ok) { setError(ticket.error ?? 'Upload failed.'); return; }
+
+      const put = await fetch(ticket.uploadUrl, {
+        method: 'PUT',
+        headers: { 'content-type': ticket.contentType },
+        body: file,
+      });
+      if (!put.ok) { setError('Your file could not be stored. Please try again.'); return; }
+
+      const res = await fetch('/api/resumes/confirm', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ resumeId: ticket.resumeId, fileName: file.name }),
+      });
       const json = await res.json();
 
       if (!res.ok) { setError(json.error ?? 'Upload failed.'); return; }

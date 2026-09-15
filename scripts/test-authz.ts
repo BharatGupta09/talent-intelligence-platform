@@ -14,9 +14,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(import.meta.dirname, '..');
-const rls = readFileSync(join(root, 'supabase/migrations/0002_rls.sql'), 'utf8');
-const schema = readFileSync(join(root, 'supabase/migrations/0001_schema.sql'), 'utf8');
+const rls = readFileSync(join(root, 'db/migrations/0002_rls.sql'), 'utf8');
+const schema = readFileSync(join(root, 'db/migrations/0001_schema.sql'), 'utf8');
 const guards = readFileSync(join(root, 'lib/auth/guards.ts'), 'utf8');
+const r2 = readFileSync(join(root, 'lib/storage/r2.ts'), 'utf8');
+const confirmRoute = readFileSync(join(root, 'app/api/resumes/confirm/route.ts'), 'utf8');
+const urlRoute = readFileSync(join(root, 'app/api/resumes/[id]/url/route.ts'), 'utf8');
 
 let pass = 0;
 let fail = 0;
@@ -57,17 +60,17 @@ check('RLS is FORCEd, so table owners are not exempt', rls.includes('force row l
 /* ------------------------------------------------------------------ */
 section('Candidate isolation (§94)');
 
-check('candidate_profiles owner policy scopes to auth.uid()',
-  /cp_owner_all[\s\S]{0,200}user_id = auth\.uid\(\)/.test(rls));
+check('candidate_profiles owner policy scopes to app_user_id()',
+  /cp_owner_all[\s\S]{0,200}user_id = app_user_id\(\)/.test(rls));
 
 check('child tables scope to my_candidate_id()',
   rls.includes('candidate_id = my_candidate_id()'));
 
-check('my_candidate_id derives from auth.uid, not a parameter',
-  /my_candidate_id[\s\S]{0,300}where user_id = auth\.uid\(\)/.test(rls));
+check('my_candidate_id derives from app_user_id, not a parameter',
+  /my_candidate_id[\s\S]{0,300}where user_id = app_user_id\(\)/.test(rls));
 
 check('recruiter candidate access requires an application',
-  /candidate_visible_to_me[\s\S]{0,400}from applications a[\s\S]{0,200}j\.recruiter_id = auth\.uid\(\)/.test(rls));
+  /candidate_visible_to_me[\s\S]{0,400}from applications a[\s\S]{0,200}j\.recruiter_id = app_user_id\(\)/.test(rls));
 
 check('no policy grants recruiters unconditional candidate SELECT',
   !/cp_recruiter_read on candidate_profiles for select\s*\n?\s*using \(is_recruiter\(\)\)/.test(rls));
@@ -75,17 +78,17 @@ check('no policy grants recruiters unconditional candidate SELECT',
 /* ------------------------------------------------------------------ */
 section('Recruiter isolation (§21)');
 
-check('owns_job checks recruiter_id against auth.uid()',
-  /owns_job[\s\S]{0,300}recruiter_id = auth\.uid\(\)/.test(rls));
+check('owns_job checks recruiter_id against app_user_id()',
+  /owns_job[\s\S]{0,300}recruiter_id = app_user_id\(\)/.test(rls));
 
 check('owns_application joins through jobs to the owning recruiter',
-  /owns_application[\s\S]{0,400}join jobs j on j\.id = a\.job_id[\s\S]{0,200}j\.recruiter_id = auth\.uid\(\)/.test(rls));
+  /owns_application[\s\S]{0,400}join jobs j on j\.id = a\.job_id[\s\S]{0,200}j\.recruiter_id = app_user_id\(\)/.test(rls));
 
 check('application select policy for recruiters uses owns_application',
   rls.includes('apps_recruiter_read on applications for select using (owns_application(id))'));
 
 check('recruiter notes are scoped to the authoring recruiter',
-  /notes_recruiter_all[\s\S]{0,250}recruiter_id = auth\.uid\(\)/.test(rls));
+  /notes_recruiter_all[\s\S]{0,250}recruiter_id = app_user_id\(\)/.test(rls));
 
 /* ------------------------------------------------------------------ */
 section('Candidate cannot read recruiter-internal data (§57)');
@@ -207,14 +210,38 @@ check('candidates have no UPDATE policy on applications',
   !/apps_candidate_update/.test(rls));
 
 /* ------------------------------------------------------------------ */
-section('Storage authorization (§63)');
+section('Storage authorization (§63) — R2');
 
-check('resumes bucket is created private', /'resumes'[\s\S]{0,120}false/.test(rls));
-check('bucket restricts mime type to PDF', rls.includes("array['application/pdf']"));
-check('object owner policy checks the uid path prefix',
-  /storage\.foldername\(name\)\)\[1\] = auth\.uid\(\)::text/.test(rls));
-check('recruiter object read requires a linked application',
-  /resume_obj_recruiter_read[\s\S]{0,500}join applications a on a\.resume_id = r\.id/.test(rls));
+// MIGRATION NOTE: these replace the Supabase Storage policy assertions.
+// Supabase enforced the uid path prefix inside storage RLS. R2 has no such
+// layer, so the same property is now enforced by deriving the object key
+// server-side from the session. These assertions check that, and that the
+// bucket is never addressed publicly.
+check('resume object key is namespaced by the user id',
+  /resumeKey[\s\S]{0,200}\$\{userId\}\/\$\{resumeId\}\.pdf/.test(r2));
+
+check('uploads are pinned to the PDF content type',
+  r2.includes("RESUME_CONTENT_TYPE = 'application/pdf'")
+  && /PutObjectCommand[\s\S]{0,300}ContentType: RESUME_CONTENT_TYPE/.test(r2));
+
+check('upload presign also pins content length',
+  /PutObjectCommand[\s\S]{0,300}ContentLength: contentLength/.test(r2));
+
+check('storage layer never builds a public object URL',
+  !/\.r2\.dev/.test(r2) && !r2.includes('getPublicUrl') && !/public: *true/.test(r2));
+
+check('confirm derives the key from the session, never from the request body',
+  /const key = resumeKey\(user\.id, resumeId\)/.test(confirmRoute)
+  && !/storage_path:\s*(body|parsed|input)/.test(confirmRoute));
+
+check('confirm re-checks the stored object size server side',
+  /objectSize\(key\)/.test(confirmRoute) && /MAX_RESUME_BYTES/.test(confirmRoute));
+
+check('signed read is gated by a database read first',
+  /from\('resumes'\)[\s\S]{0,200}maybeSingle\(\)[\s\S]{0,200}presignDownload/.test(urlRoute));
+
+check('an unreadable resume is a 404, indistinguishable from absent',
+  /if \(!resume\) throw new AuthzError\(404/.test(urlRoute));
 
 /* ------------------------------------------------------------------ */
 section('Public exposure (§18)');

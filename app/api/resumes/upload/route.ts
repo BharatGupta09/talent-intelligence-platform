@@ -1,120 +1,65 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireCandidateId, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
-import { createAdminClient } from '@/lib/supabase/admin';
-import { enqueue } from '@/lib/ai/service';
-import {
-  validateUpload, extractPdfText, checksum, PdfError, PDF_ERROR_COPY,
-} from '@/lib/resume/pdf';
+import { validateUpload, PdfError, PDF_ERROR_COPY } from '@/lib/resume/pdf';
+import { presignUpload, resumeKey, RESUME_CONTENT_TYPE } from '@/lib/storage/r2';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
 
 /**
- * Resume upload (§15).
+ * Step 1 of resume upload: hand back a presigned URL.
  *
- * Ordering is deliberate and matters for §65: the file is stored FIRST, and
- * the database row is created before extraction is attempted. If extraction
- * then fails, the candidate still has their file and a row explaining why —
- * nothing is lost and nothing is silently discarded.
+ * MIGRATION NOTE (Supabase Storage -> R2):
+ * The file used to be posted here and forwarded to storage. It no longer
+ * passes through this function at all, for a concrete reason: a Vercel
+ * function rejects request bodies over 4.5 MB, while the product accepts
+ * resumes up to 5 MB. Routing the bytes through the server would have meant
+ * either a 413 on large files or cutting the documented limit. The browser
+ * now PUTs straight to R2 and calls /api/resumes/confirm afterwards.
+ *
+ * The presigned URL pins bucket, key, content type and content length, so it
+ * cannot be reused to store a different or larger object. The key is
+ * namespaced by user id, exactly as before.
  */
+const Body = z.object({
+  fileName: z.string().trim().min(1).max(200),
+  fileSize: z.number().int().positive(),
+  contentType: z.string().trim().max(120),
+});
+
 export async function POST(request: Request) {
   try {
-    const { user, candidateId } = await requireCandidateId();
-    const supabase = await createClient();
+    const { user } = await requireCandidateId();
 
-    const form = await request.formData();
-    const file = form.get('file');
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: 'No file was received.' }, { status: 400 });
+    const parsed = Body.safeParse(await request.json());
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'No file details were received.' }, { status: 400 });
     }
+    const { fileName, fileSize, contentType } = parsed.data;
 
+    // Same validation as before, now against the declared metadata. The
+    // confirm step re-checks the stored object's real size, so a client that
+    // lies here gains nothing.
     try {
-      validateUpload({ name: file.name, size: file.size, type: file.type });
+      validateUpload({ name: fileName, size: fileSize, type: contentType });
     } catch (err) {
       if (err instanceof PdfError) {
-        return NextResponse.json({ error: PDF_ERROR_COPY[err.code], code: err.code }, { status: 400 });
+        return NextResponse.json(
+          { error: PDF_ERROR_COPY[err.code], code: err.code }, { status: 400 },
+        );
       }
       throw err;
     }
 
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const hash = await checksum(bytes);
-
-    // Storage key is namespaced by auth uid; the storage RLS policy checks
-    // that the first path segment equals auth.uid().
     const resumeId = crypto.randomUUID();
-    const storagePath = `${user.id}/${resumeId}.pdf`;
+    const key = resumeKey(user.id, resumeId);
+    const uploadUrl = await presignUpload(key, fileSize);
 
-    const { error: uploadError } = await supabase.storage
-      .from('resumes')
-      .upload(storagePath, bytes, { contentType: 'application/pdf', upsert: false });
-
-    if (uploadError) {
-      return NextResponse.json(
-        { error: 'Your file could not be stored. Please try again.' }, { status: 502 },
-      );
-    }
-
-    // Retire the previous active resume. The partial unique index allows only
-    // one active row per candidate, so this must happen before insert.
-    await supabase.from('resumes')
-      .update({ is_active: false }).eq('candidate_id', candidateId).eq('is_active', true);
-
-    const { data: resume, error: insertError } = await supabase
-      .from('resumes')
-      .insert({
-        id: resumeId,
-        candidate_id: candidateId,
-        storage_path: storagePath,
-        file_name: file.name.slice(0, 200),
-        file_size: file.size,
-        checksum: hash,
-        status: 'uploaded',
-        is_active: true,
-      })
-      .select('id')
-      .single();
-
-    if (insertError || !resume) {
-      // Roll back the orphaned object so storage does not drift from the DB.
-      await supabase.storage.from('resumes').remove([storagePath]);
-      return NextResponse.json({ error: 'Your resume could not be saved. Please try again.' }, { status: 500 });
-    }
-
-    // Extraction. A failure here degrades the row but never deletes it.
-    try {
-      const extracted = await extractPdfText(bytes);
-      await supabase.from('resumes').update({
-        extracted_text: extracted.text,
-        page_count: extracted.pageCount,
-        status: 'queued',
-        extraction_error: null,
-      }).eq('id', resume.id);
-
-      await enqueue('resume_analysis', resume.id);
-
-      return NextResponse.json({
-        id: resume.id,
-        status: 'queued',
-        pageCount: extracted.pageCount,
-        message: 'Resume uploaded. Analysis is running.',
-      });
-    } catch (err) {
-      const code = err instanceof PdfError ? err.code : 'malformed';
-      const message = PDF_ERROR_COPY[code] ?? PDF_ERROR_COPY.malformed;
-
-      await supabase.from('resumes').update({
-        status: 'requires_review',
-        extraction_error: message,
-      }).eq('id', resume.id);
-
-      // 200, not an error status: the upload itself succeeded and the file is
-      // safe. The client renders the recoverable state.
-      return NextResponse.json({
-        id: resume.id, status: 'requires_review', code, message,
-      });
-    }
+    return NextResponse.json({
+      resumeId,
+      uploadUrl,
+      contentType: RESUME_CONTENT_TYPE,
+    });
   } catch (err) {
     return errorResponse(err);
   }

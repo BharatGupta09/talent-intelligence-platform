@@ -1,8 +1,15 @@
 import 'server-only';
-import { createClient } from '@supabase/supabase-js';
+import { serviceClient, type DataClient } from '@/lib/db';
 
 /**
- * Service-role client. BYPASSES RLS.
+ * Service client. BYPASSES RLS.
+ *
+ * MIGRATION NOTE (Supabase -> Neon):
+ * This used to be the service-role key, which bypassed RLS at the PostgREST
+ * layer. Neon has no such key. The replacement runs each query inside a
+ * transaction that sets `app.service_op`, which the `*_svc` policies in
+ * 0002_rls.sql accept. Same effect, but the escape is transaction-scoped,
+ * visible in SQL, and cannot leak onto a pooled connection.
  *
  * Permitted callers only:
  *   - the AI worker, which must write analyses on behalf of the system
@@ -13,10 +20,6 @@ import { createClient } from '@supabase/supabase-js';
  * import it into a Client Component. The `server-only` import above turns
  * any such attempt into a build error.
  */
-export function createAdminClient() {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!key) throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured.');
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+export function createAdminClient(): DataClient {
+  return serviceClient();
 }

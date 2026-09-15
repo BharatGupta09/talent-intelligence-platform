@@ -31,8 +31,23 @@ create type ai_job_status      as enum ('queued', 'processing', 'completed', 'fa
 -- ---------------------------------------------------------------------
 -- Identity
 -- ---------------------------------------------------------------------
+-- ---------------------------------------------------------------------
+-- Credential store. Replaces the Supabase auth schema's user table.
+-- MIGRATION NOTE: holds only what is needed to authenticate. Every other
+-- attribute (role, name, active flag) stays in `profiles`, unchanged, so
+-- the 27-table shape and all foreign keys are preserved.
+-- ---------------------------------------------------------------------
+create table users (
+  id            uuid primary key default gen_random_uuid(),
+  email         text        not null unique,
+  password_hash text        not null,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
+  constraint users_email_lower check (email = lower(email))
+);
+
 create table profiles (
-  id          uuid primary key references auth.users(id) on delete cascade,
+  id          uuid primary key references users(id) on delete cascade,
   role        user_role   not null default 'candidate',
   email       text        not null,
   full_name   text        not null default '',
@@ -433,7 +448,7 @@ do $$
 declare t text;
 begin
   foreach t in array array[
-    'profiles','candidate_profiles','jobs','resumes','applications',
+    'users','profiles','candidate_profiles','jobs','resumes','applications',
     'application_analyses','ai_jobs'
   ] loop
     execute format(
@@ -441,24 +456,3 @@ begin
       t, t);
   end loop;
 end $$;
-
--- New auth user -> profile row (role assigned from signup metadata, default candidate)
-create or replace function handle_new_user() returns trigger
-language plpgsql security definer set search_path = public as $$
-declare assigned user_role;
-begin
-  assigned := coalesce((new.raw_user_meta_data ->> 'role')::user_role, 'candidate');
-  insert into public.profiles (id, email, full_name, role)
-  values (new.id, lower(new.email), coalesce(new.raw_user_meta_data ->> 'full_name', ''), assigned)
-  on conflict (id) do nothing;
-
-  if assigned = 'candidate' then
-    insert into public.candidate_profiles (user_id) values (new.id)
-    on conflict (user_id) do nothing;
-  end if;
-  return new;
-end $$;
-
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute function handle_new_user();
