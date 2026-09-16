@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requirePage } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { EmptyState, CategoryPill } from '@/components/ui';
 import { STAGE_LABEL } from '@/components/stage-tracker';
@@ -16,9 +16,9 @@ const COLUMNS = [
 
 export default async function Pipeline() {
   const user = await requirePage('recruiter', 'admin');
-  const supabase = await createClient();
+  const db = await createClient();
 
-  const { data: apps } = await supabase
+  const { data: apps } = await db
     .from('applications')
     .select(`id, stage, jobs(title), candidate_profiles(profiles(full_name)),
              application_scores(overall, category)`)

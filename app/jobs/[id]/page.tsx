@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { getSessionUser } from '@/lib/auth/guards';
 import { PublicHeader, PublicFooter } from '@/components/site-header';
 import { ImportanceTag } from '@/components/ui';
@@ -9,13 +9,13 @@ export const dynamic = 'force-dynamic';
 
 export default async function JobDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
+  const db = await createClient();
   const user = await getSessionUser();
 
-  const { data: job } = await supabase.from('jobs').select('*').eq('id', id).maybeSingle();
+  const { data: job } = await db.from('jobs').select('*').eq('id', id).maybeSingle();
   if (!job) notFound();
 
-  const { data: requirements } = await supabase
+  const { data: requirements } = await db
     .from('job_requirements')
     .select('id, label, kind, importance, detail')
     .eq('job_id', id)

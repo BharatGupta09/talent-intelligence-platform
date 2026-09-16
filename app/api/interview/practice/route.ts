@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireCandidateId, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { practiceFeedback } from '@/lib/ai/service';
 import { AiError } from '@/lib/ai/groq';
 
@@ -19,7 +19,7 @@ const bodySchema = z.object({
 export async function POST(request: Request) {
   try {
     const { candidateId } = await requireCandidateId();
-    const supabase = await createClient();
+    const db = await createClient();
 
     const parsed = bodySchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
@@ -34,7 +34,7 @@ export async function POST(request: Request) {
       question: b.question, answer: b.answer, jobTitle: b.jobTitle,
     });
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('interview_practice')
       .insert({
         candidate_id: candidateId,

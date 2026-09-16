@@ -1,5 +1,5 @@
 import 'server-only';
-import { createAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { structured, AiError } from './groq';
 import {
   jobAnalysisPrompt, jobAnalysisSchema,

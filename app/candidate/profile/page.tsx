@@ -1,5 +1,5 @@
 import { requirePage } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { ProfileForm } from './profile-form';
 
@@ -8,9 +8,9 @@ export const metadata = { title: 'Profile' };
 
 export default async function ProfilePage() {
   const user = await requirePage('candidate');
-  const supabase = await createClient();
+  const db = await createClient();
 
-  const { data: profile } = await supabase
+  const { data: profile } = await db
     .from('candidate_profiles')
     .select('id, phone, location, headline, summary, linkedin_url, portfolio_url, years_experience, completeness')
     .eq('user_id', user.id).single();

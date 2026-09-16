@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireCandidateId, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { enqueue } from '@/lib/ai/service';
 import {
   extractPdfText, checksum, PdfError, PDF_ERROR_COPY, MAX_RESUME_BYTES,
@@ -56,16 +56,16 @@ export async function POST(request: Request) {
       );
     }
 
-    const supabase = await createClient();
+    const db = await createClient();
     const bytes = await getObjectBytes(key);
     const hash = await checksum(bytes);
 
     // Retire the previous active resume. The partial unique index allows only
     // one active row per candidate, so this must happen before insert.
-    await supabase.from('resumes')
+    await db.from('resumes')
       .update({ is_active: false }).eq('candidate_id', candidateId).eq('is_active', true);
 
-    const { data: resume, error: insertError } = await supabase
+    const { data: resume, error: insertError } = await db
       .from('resumes')
       .insert({
         id: resumeId,
@@ -91,7 +91,7 @@ export async function POST(request: Request) {
     // Extraction. A failure here degrades the row but never deletes it.
     try {
       const extracted = await extractPdfText(bytes);
-      await supabase.from('resumes').update({
+      await db.from('resumes').update({
         extracted_text: extracted.text,
         page_count: extracted.pageCount,
         status: 'queued',
@@ -110,7 +110,7 @@ export async function POST(request: Request) {
       const code = err instanceof PdfError ? err.code : 'malformed';
       const message = PDF_ERROR_COPY[code] ?? PDF_ERROR_COPY.malformed;
 
-      await supabase.from('resumes').update({
+      await db.from('resumes').update({
         status: 'requires_review',
         extraction_error: message,
       }).eq('id', resume.id);

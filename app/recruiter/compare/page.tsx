@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requirePage } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { EmptyState } from '@/components/ui';
 import { CompareView, type CompareCandidate } from './compare-view';
@@ -14,7 +14,7 @@ export default async function ComparePage({
 }: { searchParams: Promise<{ job?: string; ids?: string }> }) {
   const sp = await searchParams;
   const user = await requirePage('recruiter', 'admin');
-  const supabase = await createClient();
+  const db = await createClient();
 
   const ids = (sp.ids ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -29,11 +29,11 @@ export default async function ComparePage({
     );
   }
 
-  const { data: job } = await supabase.from('jobs').select('id, title').eq('id', sp.job).maybeSingle();
+  const { data: job } = await db.from('jobs').select('id, title').eq('id', sp.job).maybeSingle();
 
   // Scoped by job_id as well as the id list, so an id from another role
   // cannot be spliced into the comparison via the query string.
-  const { data: apps } = await supabase
+  const { data: apps } = await db
     .from('applications')
     .select(`id, stage, candidate_profiles(years_experience, profiles(full_name)),
              application_scores(overall, category, components),

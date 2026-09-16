@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireUser, errorResponse, AuthzError } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { presignDownload } from '@/lib/storage/r2';
 
 export const runtime = 'nodejs';
@@ -22,9 +22,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   try {
     await requireUser();
     const { id } = await params;
-    const supabase = await createClient();
+    const db = await createClient();
 
-    const { data: resume } = await supabase
+    const { data: resume } = await db
       .from('resumes').select('id, storage_path, file_name').eq('id', id).maybeSingle();
 
     if (!resume) throw new AuthzError(404, 'Resume not found.');

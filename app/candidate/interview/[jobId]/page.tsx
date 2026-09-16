@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requirePage } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { PrepWorkspace } from './prep-workspace';
 
@@ -10,15 +10,15 @@ export const dynamic = 'force-dynamic';
 export default async function InterviewPrepPage({ params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await params;
   const user = await requirePage('candidate');
-  const supabase = await createClient();
+  const db = await createClient();
 
-  const { data: job } = await supabase.from('jobs').select('id, title, company').eq('id', jobId).maybeSingle();
+  const { data: job } = await db.from('jobs').select('id, title, company').eq('id', jobId).maybeSingle();
   if (!job) notFound();
 
-  const { data: candidate } = await supabase
+  const { data: candidate } = await db
     .from('candidate_profiles').select('id').eq('user_id', user.id).single();
 
-  const { data: prep } = await supabase
+  const { data: prep } = await db
     .from('interview_preps').select('id, questions')
     .eq('job_id', jobId).eq('candidate_id', candidate?.id ?? '').maybeSingle();
 

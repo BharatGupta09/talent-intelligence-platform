@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requirePage } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { EmptyState, CategoryPill } from '@/components/ui';
 import { STAGE_LABEL } from '@/components/stage-tracker';
@@ -11,9 +11,9 @@ export const metadata = { title: 'Applications' };
 
 export default async function CandidateApplications() {
   const user = await requirePage('candidate');
-  const supabase = await createClient();
+  const db = await createClient();
 
-  const { data: apps } = await supabase
+  const { data: apps } = await db
     .from('applications')
     .select('id, stage, screening_status, submitted_at, jobs(title, company), application_scores(category)')
     .order('submitted_at', { ascending: false });

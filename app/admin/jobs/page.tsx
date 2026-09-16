@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requirePage } from '@/lib/auth/guards';
-import { createAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { Panel, EmptyState } from '@/components/ui';
 

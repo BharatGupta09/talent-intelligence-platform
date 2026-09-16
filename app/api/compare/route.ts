@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireRole, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { compareCandidates } from '@/lib/ai/service';
 import { AiError } from '@/lib/ai/groq';
 
@@ -17,14 +17,14 @@ const bodySchema = z.object({
 export async function POST(request: Request) {
   try {
     const user = await requireRole('recruiter', 'admin');
-    const supabase = await createClient();
+    const db = await createClient();
 
     const parsed = bodySchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
       return NextResponse.json({ error: 'Select between two and five candidates to compare.' }, { status: 400 });
     }
 
-    const { data: job } = await supabase
+    const { data: job } = await db
       .from('jobs').select('id, title, recruiter_id').eq('id', parsed.data.jobId).maybeSingle();
     if (!job) return NextResponse.json({ error: 'Role not found.' }, { status: 404 });
     if (user.role === 'recruiter' && job.recruiter_id !== user.id) {
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
 
     // Filtering on job_id as well as the id list stops a caller from splicing
     // in an application that belongs to a different role.
-    const { data: apps } = await supabase
+    const { data: apps } = await db
       .from('applications')
       .select(`id, candidate_profiles(profiles(full_name)),
                application_analyses(requirement_matrix, strengths, concerns)`)

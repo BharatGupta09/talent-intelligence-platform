@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireCandidateId, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { enqueue, notifyUser } from '@/lib/ai/service';
 
 export const runtime = 'nodejs';
@@ -19,7 +19,7 @@ const bodySchema = z.object({ jobId: z.string().uuid() });
 export async function POST(request: Request) {
   try {
     const { user, candidateId } = await requireCandidateId();
-    const supabase = await createClient();
+    const db = await createClient();
 
     const parsed = bodySchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     }
     const { jobId } = parsed.data;
 
-    const { data: job } = await supabase
+    const { data: job } = await db
       .from('jobs')
       .select('id, title, company, description, responsibilities, preferred_quals, nice_to_have, experience_min, experience_max, education_level, status, spec_version, recruiter_id')
       .eq('id', jobId)
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: resume } = await supabase
+    const { data: resume } = await db
       .from('resumes')
       .select('id, extracted_text, status')
       .eq('candidate_id', candidateId).eq('is_active', true).maybeSingle();
@@ -57,11 +57,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: requirements } = await supabase
+    const { data: requirements } = await db
       .from('job_requirements').select('id, label, kind, importance, detail')
       .eq('job_id', jobId).order('sort_order');
 
-    const { data: application, error } = await supabase
+    const { data: application, error } = await db
       .from('applications')
       .insert({
         job_id: jobId,
@@ -99,7 +99,7 @@ export async function POST(request: Request) {
       throw error;
     }
 
-    await supabase.from('application_events').insert({
+    await db.from('application_events').insert({
       application_id: application.id,
       actor_id: user.id,
       to_stage: 'submitted',

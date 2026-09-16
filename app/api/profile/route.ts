@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireCandidateId, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 
 export const runtime = 'nodejs';
 
@@ -30,7 +30,7 @@ function completeness(p: Record<string, unknown>, counts: Record<string, number>
 export async function PUT(request: Request) {
   try {
     const { user, candidateId } = await requireCandidateId();
-    const supabase = await createClient();
+    const db = await createClient();
 
     const parsed = profileSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
@@ -41,7 +41,7 @@ export async function PUT(request: Request) {
     }
     const body = parsed.data;
 
-    await supabase.from('profiles').update({ full_name: body.fullName }).eq('id', user.id);
+    await db.from('profiles').update({ full_name: body.fullName }).eq('id', user.id);
 
     const patch = {
       phone: body.phone || null,
@@ -53,13 +53,13 @@ export async function PUT(request: Request) {
       years_experience: body.yearsExperience ?? null,
     };
 
-    await supabase.from('candidate_profiles').update(patch).eq('id', candidateId);
+    await db.from('candidate_profiles').update(patch).eq('id', candidateId);
 
     const [exp, edu, proj, res] = await Promise.all([
-      supabase.from('candidate_experience').select('id', { count: 'exact', head: true }).eq('candidate_id', candidateId),
-      supabase.from('candidate_education').select('id', { count: 'exact', head: true }).eq('candidate_id', candidateId),
-      supabase.from('candidate_projects').select('id', { count: 'exact', head: true }).eq('candidate_id', candidateId),
-      supabase.from('resumes').select('id', { count: 'exact', head: true }).eq('candidate_id', candidateId).eq('is_active', true),
+      db.from('candidate_experience').select('id', { count: 'exact', head: true }).eq('candidate_id', candidateId),
+      db.from('candidate_education').select('id', { count: 'exact', head: true }).eq('candidate_id', candidateId),
+      db.from('candidate_projects').select('id', { count: 'exact', head: true }).eq('candidate_id', candidateId),
+      db.from('resumes').select('id', { count: 'exact', head: true }).eq('candidate_id', candidateId).eq('is_active', true),
     ]);
 
     const score = completeness(patch, {
@@ -67,7 +67,7 @@ export async function PUT(request: Request) {
       projects: proj.count ?? 0, resume: res.count ?? 0,
     });
 
-    await supabase.from('candidate_profiles').update({ completeness: score }).eq('id', candidateId);
+    await db.from('candidate_profiles').update({ completeness: score }).eq('id', candidateId);
 
     return NextResponse.json({ ok: true, completeness: score });
   } catch (err) {

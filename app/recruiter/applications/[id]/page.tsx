@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requirePage, requireApplicationAccess } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { Panel, ScoreDial, CategoryPill, EvidenceBadge, ImportanceTag, AiDisclosure, ProcessingState, ErrorState } from '@/components/ui';
 import { DIMENSION_LABEL, type Dimension, type MatchCategory } from '@/lib/scoring/engine';
@@ -15,9 +15,9 @@ export default async function CandidateWorkspace({ params }: { params: Promise<{
   const { id } = await params;
   const user = await requirePage('recruiter', 'admin');
   await requireApplicationAccess(id);
-  const supabase = await createClient();
+  const db = await createClient();
 
-  const { data: app } = await supabase
+  const { data: app } = await db
     .from('applications')
     .select(`id, stage, screening_status, submitted_at, job_id, resume_id,
              jobs(id, title, company),
@@ -50,20 +50,20 @@ export default async function CandidateWorkspace({ params }: { params: Promise<{
     strengths: string[]; concerns: string[]; summary: string | null; model: string;
   } | null;
 
-  const { data: notes } = await supabase
+  const { data: notes } = await db
     .from('recruiter_notes').select('id, body, created_at')
     .eq('application_id', id).order('created_at', { ascending: false });
 
-  const { data: tags } = await supabase.from('application_tags').select('tag').eq('application_id', id);
+  const { data: tags } = await db.from('application_tags').select('tag').eq('application_id', id);
 
-  const { data: events } = await supabase
+  const { data: events } = await db
     .from('application_events').select('kind, from_stage, to_stage, note, created_at')
     .eq('application_id', id).order('created_at', { ascending: false }).limit(12);
 
-  const { data: kit } = await supabase
+  const { data: kit } = await db
     .from('interview_kits').select('questions').eq('application_id', id).maybeSingle();
 
-  const { data: rank } = await supabase
+  const { data: rank } = await db
     .from('applications').select('id, application_scores(overall)').eq('job_id', app.job_id);
   const ranked = (rank ?? [])
     .map((r) => ({ id: r.id, overall: Number((r.application_scores as unknown as { overall: number } | null)?.overall ?? -1) }))

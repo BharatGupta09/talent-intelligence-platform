@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireJobOwnership, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { enqueue } from '@/lib/ai/service';
 
 export const runtime = 'nodejs';
@@ -30,7 +30,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     const { id } = await params;
     await requireJobOwnership(id);
-    const supabase = await createClient();
+    const db = await createClient();
 
     const parsed = patchSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
@@ -41,7 +41,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
     const b = parsed.data;
 
-    const { data: current } = await supabase
+    const { data: current } = await db
       .from('jobs').select('status, spec_version, description').eq('id', id).single();
     if (!current) return NextResponse.json({ error: 'Role not found.' }, { status: 404 });
 
@@ -73,7 +73,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     if (specChanged) patch.spec_version = current.spec_version + 1;
 
-    const { error } = await supabase.from('jobs').update(patch).eq('id', id);
+    const { error } = await db.from('jobs').update(patch).eq('id', id);
     if (error) throw error;
 
     if (specChanged) await enqueue('job_analysis', id);

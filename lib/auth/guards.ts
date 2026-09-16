@@ -1,6 +1,6 @@
 import 'server-only';
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { currentUserId } from '@/lib/auth/session';
 
 /**
@@ -42,8 +42,8 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   const userId = await currentUserId();
   if (!userId) return null;
 
-  const supabase = await createClient();
-  const { data: profile } = await supabase
+  const db = await createClient();
+  const { data: profile } = await db
     .from('profiles')
     .select('id, email, role, full_name, is_active')
     .eq('id', userId)
@@ -92,8 +92,8 @@ export function homeFor(role: Role): string {
 /** Resolves the candidate_profiles row for the current candidate. */
 export async function requireCandidateId(): Promise<{ user: SessionUser; candidateId: string }> {
   const user = await requireRole('candidate');
-  const supabase = await createClient();
-  const { data } = await supabase
+  const db = await createClient();
+  const { data } = await db
     .from('candidate_profiles')
     .select('id')
     .eq('user_id', user.id)
@@ -110,9 +110,9 @@ export async function requireApplicationAccess(applicationId: string): Promise<{
   user: SessionUser; jobId: string; candidateId: string;
 }> {
   const user = await requireRole('recruiter', 'admin');
-  const supabase = await createClient();
+  const db = await createClient();
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('applications')
     .select('id, job_id, candidate_id, jobs!inner(recruiter_id)')
     .eq('id', applicationId)
@@ -132,8 +132,8 @@ export async function requireApplicationAccess(applicationId: string): Promise<{
 
 export async function requireJobOwnership(jobId: string): Promise<SessionUser> {
   const user = await requireRole('recruiter', 'admin');
-  const supabase = await createClient();
-  const { data, error } = await supabase
+  const db = await createClient();
+  const { data, error } = await db
     .from('jobs')
     .select('id, recruiter_id')
     .eq('id', jobId)

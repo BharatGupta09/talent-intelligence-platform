@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requirePage } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { Panel, ImportanceTag } from '@/components/ui';
 import { MatchPanel } from './match-panel';
@@ -11,22 +11,22 @@ export const dynamic = 'force-dynamic';
 export default async function CandidateJobDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requirePage('candidate');
-  const supabase = await createClient();
+  const db = await createClient();
 
-  const { data: job } = await supabase.from('jobs').select('*').eq('id', id).maybeSingle();
+  const { data: job } = await db.from('jobs').select('*').eq('id', id).maybeSingle();
   if (!job) notFound();
 
-  const { data: candidate } = await supabase
+  const { data: candidate } = await db
     .from('candidate_profiles').select('id').eq('user_id', user.id).single();
 
-  const { data: existing } = await supabase
+  const { data: existing } = await db
     .from('applications').select('id, stage').eq('job_id', id)
     .eq('candidate_id', candidate?.id ?? '').maybeSingle();
 
-  const { data: resume } = await supabase
+  const { data: resume } = await db
     .from('resumes').select('id, status').eq('is_active', true).maybeSingle();
 
-  const { data: requirements } = await supabase
+  const { data: requirements } = await db
     .from('job_requirements').select('id, label, importance, detail')
     .eq('job_id', id).order('sort_order');
 

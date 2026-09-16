@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requirePage } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { Panel, CategoryPill, EvidenceBadge, ProcessingState, AiDisclosure, ErrorState } from '@/components/ui';
 import { StageTracker } from '@/components/stage-tracker';
@@ -12,10 +12,10 @@ export const dynamic = 'force-dynamic';
 export default async function CandidateApplicationDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requirePage('candidate');
-  const supabase = await createClient();
+  const db = await createClient();
 
   // RLS restricts this to the signed-in candidate's own applications.
-  const { data: app } = await supabase
+  const { data: app } = await db
     .from('applications')
     .select(`id, stage, screening_status, submitted_at, job_id,
              jobs(title, company, location),

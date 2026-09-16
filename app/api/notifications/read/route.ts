@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireUser, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 
 export const runtime = 'nodejs';
 
@@ -10,11 +10,11 @@ const bodySchema = z.object({ id: z.string().uuid().optional(), all: z.boolean()
 export async function POST(request: Request) {
   try {
     const user = await requireUser();
-    const supabase = await createClient();
+    const db = await createClient();
 
     const parsed = bodySchema.safeParse(await request.json().catch(() => ({})));
     const now = new Date().toISOString();
-    let query = supabase.from('notifications').update({ read_at: now }).eq('user_id', user.id).is('read_at', null);
+    let query = db.from('notifications').update({ read_at: now }).eq('user_id', user.id).is('read_at', null);
 
     if (parsed.success && parsed.data.id && !parsed.data.all) {
       query = query.eq('id', parsed.data.id);

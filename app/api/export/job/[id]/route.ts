@@ -1,5 +1,5 @@
 import { requireJobOwnership, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { toCsv, csvResponse } from '@/lib/export/csv';
 
 export const runtime = 'nodejs';
@@ -9,11 +9,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   try {
     const { id } = await params;
     await requireJobOwnership(id);
-    const supabase = await createClient();
+    const db = await createClient();
 
-    const { data: job } = await supabase.from('jobs').select('title, company').eq('id', id).single();
+    const { data: job } = await db.from('jobs').select('title, company').eq('id', id).single();
 
-    const { data: apps } = await supabase
+    const { data: apps } = await db
       .from('applications')
       .select(`id, stage, screening_status, submitted_at,
                candidate_profiles(location, years_experience, profiles(full_name, email)),

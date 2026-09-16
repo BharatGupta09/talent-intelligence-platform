@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { PublicHeader, PublicFooter } from '@/components/site-header';
 import { EmptyState } from '@/components/ui';
 
@@ -12,8 +12,8 @@ export const dynamic = 'force-dynamic';
  * so a closed job cannot leak here even if this query forgot to filter.
  */
 export default async function JobsPage() {
-  const supabase = await createClient();
-  const { data: jobs, error } = await supabase
+  const db = await createClient();
+  const { data: jobs, error } = await db
     .from('jobs')
     .select('id, title, company, location, employment_type, published_at, status')
     .eq('status', 'active')

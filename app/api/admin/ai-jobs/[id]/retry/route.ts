@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireRole, errorResponse } from '@/lib/auth/guards';
-import { createAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient } from '@/lib/db/admin';
 
 export const runtime = 'nodejs';
 

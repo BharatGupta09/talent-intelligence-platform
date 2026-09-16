@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { Wordmark } from './site-header';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import type { SessionUser } from '@/lib/auth/guards';
 
 const NAV: Record<string, Array<[string, string]>> = {
@@ -27,8 +27,8 @@ const NAV: Record<string, Array<[string, string]>> = {
 };
 
 export async function AppShell({ user, children }: { user: SessionUser; children: React.ReactNode }) {
-  const supabase = await createClient();
-  const { count: unread } = await supabase
+  const db = await createClient();
+  const { count: unread } = await db
     .from('notifications')
     .select('id', { count: 'exact', head: true })
     .is('read_at', null);

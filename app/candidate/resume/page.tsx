@@ -1,5 +1,5 @@
 import { requirePage } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { ResumeWorkspace } from './resume-workspace';
 
@@ -8,18 +8,18 @@ export const metadata = { title: 'Resume' };
 
 export default async function ResumePage() {
   const user = await requirePage('candidate');
-  const supabase = await createClient();
+  const db = await createClient();
 
-  const { data: candidate } = await supabase
+  const { data: candidate } = await db
     .from('candidate_profiles').select('id').eq('user_id', user.id).single();
 
-  const { data: resume } = await supabase
+  const { data: resume } = await db
     .from('resumes')
     .select('id, file_name, file_size, page_count, status, extraction_error, created_at, extracted_text')
     .eq('is_active', true).maybeSingle();
 
   const { data: analysis } = resume
-    ? await supabase.from('resume_analyses')
+    ? await db.from('resume_analyses')
         .select('ats_score, ats, sections, extracted, strengths, improvements, created_at')
         .eq('resume_id', resume.id).maybeSingle()
     : { data: null };

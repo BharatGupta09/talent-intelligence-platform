@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireRole, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 
 export const runtime = 'nodejs';
 
@@ -21,7 +21,7 @@ const bodySchema = z.object({
 export async function PATCH(request: Request) {
   try {
     const user = await requireRole('admin');
-    const supabase = await createClient();
+    const db = await createClient();
 
     const parsed = bodySchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
@@ -36,7 +36,7 @@ export async function PATCH(request: Request) {
     if (b.backoffMs != null) patch.backoff_ms = b.backoffMs;
     if (b.features != null) patch.features = b.features;
 
-    const { error } = await supabase.from('ai_settings').update(patch).eq('id', true);
+    const { error } = await db.from('ai_settings').update(patch).eq('id', true);
     if (error) throw error;
 
     return NextResponse.json({ ok: true });

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requirePage } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { Panel, EmptyState } from '@/components/ui';
 
@@ -9,16 +9,16 @@ export const metadata = { title: 'Interview preparation' };
 
 export default async function InterviewIndex() {
   const user = await requirePage('candidate');
-  const supabase = await createClient();
+  const db = await createClient();
 
-  const { data: apps } = await supabase
+  const { data: apps } = await db
     .from('applications').select('id, job_id, jobs(title, company)')
     .order('submitted_at', { ascending: false });
 
-  const { data: preps } = await supabase.from('interview_preps').select('job_id');
+  const { data: preps } = await db.from('interview_preps').select('job_id');
   const prepared = new Set((preps ?? []).map((p) => p.job_id));
 
-  const { data: practice } = await supabase
+  const { data: practice } = await db
     .from('interview_practice').select('id, question, created_at')
     .order('created_at', { ascending: false }).limit(5);
 

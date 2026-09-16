@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requirePage } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { EmptyState } from '@/components/ui';
 
@@ -9,13 +9,13 @@ export const metadata = { title: 'Roles' };
 
 export default async function RecruiterJobs() {
   const user = await requirePage('recruiter', 'admin');
-  const supabase = await createClient();
+  const db = await createClient();
 
-  const { data: jobs } = await supabase
+  const { data: jobs } = await db
     .from('jobs').select('id, title, company, location, status, created_at, spec_version')
     .order('created_at', { ascending: false });
 
-  const { data: apps } = await supabase.from('applications').select('job_id');
+  const { data: apps } = await db.from('applications').select('job_id');
   const counts = new Map<string, number>();
   for (const a of apps ?? []) counts.set(a.job_id, (counts.get(a.job_id) ?? 0) + 1);
 

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requirePage } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { Panel, Stat, EmptyState, CategoryPill } from '@/components/ui';
 import type { MatchCategory } from '@/lib/scoring/engine';
@@ -16,13 +16,13 @@ const FUNNEL: Array<[string, string]> = [
 
 export default async function RecruiterOverview() {
   const user = await requirePage('recruiter', 'admin');
-  const supabase = await createClient();
+  const db = await createClient();
 
   // RLS scopes every one of these to jobs this recruiter owns.
-  const { data: jobs } = await supabase
+  const { data: jobs } = await db
     .from('jobs').select('id, title, company, status').order('created_at', { ascending: false });
 
-  const { data: apps } = await supabase
+  const { data: apps } = await db
     .from('applications')
     .select('id, stage, screening_status, submitted_at, job_id, jobs(title), application_scores(overall, category)');
 

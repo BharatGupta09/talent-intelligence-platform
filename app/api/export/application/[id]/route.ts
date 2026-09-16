@@ -1,5 +1,5 @@
 import { requireApplicationAccess, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { toCsv, csvResponse } from '@/lib/export/csv';
 
 export const runtime = 'nodejs';
@@ -9,9 +9,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   try {
     const { id } = await params;
     await requireApplicationAccess(id);
-    const supabase = await createClient();
+    const db = await createClient();
 
-    const { data: app } = await supabase
+    const { data: app } = await db
       .from('applications')
       .select(`id, stage, submitted_at, jobs(title, company),
                candidate_profiles(location, years_experience, profiles(full_name, email)),

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireRole, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { enqueue } from '@/lib/ai/service';
 
 export const runtime = 'nodejs';
@@ -24,7 +24,7 @@ const jobSchema = z.object({
 export async function POST(request: Request) {
   try {
     const user = await requireRole('recruiter', 'admin');
-    const supabase = await createClient();
+    const db = await createClient();
 
     const parsed = jobSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Maximum experience cannot be lower than minimum.' }, { status: 400 });
     }
 
-    const { data: job, error } = await supabase
+    const { data: job, error } = await db
       .from('jobs')
       .insert({
         recruiter_id: user.id,

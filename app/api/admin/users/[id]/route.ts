@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireRole, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 
 export const runtime = 'nodejs';
 
@@ -15,7 +15,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     const admin = await requireRole('admin');
     const { id } = await params;
-    const supabase = await createClient();
+    const db = await createClient();
 
     const parsed = bodySchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) return NextResponse.json({ error: 'Invalid update.' }, { status: 400 });
@@ -35,7 +35,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (parsed.data.role != null) patch.role = parsed.data.role;
     if (Object.keys(patch).length === 0) return NextResponse.json({ ok: true, unchanged: true });
 
-    const { error } = await supabase.from('profiles').update(patch).eq('id', id);
+    const { error } = await db.from('profiles').update(patch).eq('id', id);
     if (error) throw error;
 
     return NextResponse.json({ ok: true });

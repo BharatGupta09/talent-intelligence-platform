@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireApplicationAccess, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { enqueue } from '@/lib/ai/service';
 
 export const runtime = 'nodejs';
@@ -14,9 +14,9 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   try {
     const { id } = await params;
     await requireApplicationAccess(id);
-    const supabase = await createClient();
+    const db = await createClient();
 
-    await supabase.from('applications').update({ screening_status: 'queued' }).eq('id', id);
+    await db.from('applications').update({ screening_status: 'queued' }).eq('id', id);
     await enqueue('application_screening', id);
 
     return NextResponse.json({ ok: true, status: 'queued' });

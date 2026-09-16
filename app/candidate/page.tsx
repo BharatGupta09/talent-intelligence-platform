@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requirePage } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { Panel, Stat, EmptyState, ScoreDial, CategoryPill, ProcessingState } from '@/components/ui';
 import type { MatchCategory } from '@/lib/scoring/engine';
@@ -16,20 +16,20 @@ const STAGE_LABEL: Record<string, string> = {
 
 export default async function CandidateOverview() {
   const user = await requirePage('candidate');
-  const supabase = await createClient();
+  const db = await createClient();
 
-  const { data: profile } = await supabase
+  const { data: profile } = await db
     .from('candidate_profiles').select('id, completeness, summary, location').eq('user_id', user.id).single();
 
-  const { data: resume } = await supabase
+  const { data: resume } = await db
     .from('resumes').select('id, file_name, status, created_at')
     .eq('is_active', true).maybeSingle();
 
   const { data: analysis } = resume
-    ? await supabase.from('resume_analyses').select('ats_score, improvements').eq('resume_id', resume.id).maybeSingle()
+    ? await db.from('resume_analyses').select('ats_score, improvements').eq('resume_id', resume.id).maybeSingle()
     : { data: null };
 
-  const { data: applications } = await supabase
+  const { data: applications } = await db
     .from('applications')
     .select('id, stage, screening_status, submitted_at, jobs(title, company), application_scores(overall, category)')
     .order('submitted_at', { ascending: false })

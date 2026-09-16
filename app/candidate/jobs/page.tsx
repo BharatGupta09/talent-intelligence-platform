@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requirePage } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { EmptyState } from '@/components/ui';
 
@@ -9,13 +9,13 @@ export const metadata = { title: 'Roles' };
 
 export default async function CandidateJobs() {
   const user = await requirePage('candidate');
-  const supabase = await createClient();
+  const db = await createClient();
 
-  const { data: jobs } = await supabase
+  const { data: jobs } = await db
     .from('jobs').select('id, title, company, location, employment_type')
     .eq('status', 'active').order('published_at', { ascending: false });
 
-  const { data: applied } = await supabase.from('applications').select('job_id');
+  const { data: applied } = await db.from('applications').select('job_id');
   const appliedIds = new Set((applied ?? []).map((a) => a.job_id));
 
   return (

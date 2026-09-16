@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireCandidateId, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { candidateMatchPreview } from '@/lib/ai/service';
 import { AiError } from '@/lib/ai/groq';
 
@@ -18,20 +18,20 @@ const bodySchema = z.object({ jobId: z.string().uuid() });
 export async function POST(request: Request) {
   try {
     const { candidateId } = await requireCandidateId();
-    const supabase = await createClient();
+    const db = await createClient();
 
     const parsed = bodySchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
       return NextResponse.json({ error: 'A job must be specified.' }, { status: 400 });
     }
 
-    const { data: job } = await supabase
+    const { data: job } = await db
       .from('jobs').select('id, title, status').eq('id', parsed.data.jobId).maybeSingle();
     if (!job || job.status !== 'active') {
       return NextResponse.json({ error: 'That role is not open.' }, { status: 404 });
     }
 
-    const { data: resume } = await supabase
+    const { data: resume } = await db
       .from('resumes').select('extracted_text')
       .eq('candidate_id', candidateId).eq('is_active', true).maybeSingle();
 
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: requirements } = await supabase
+    const { data: requirements } = await db
       .from('job_requirements').select('label').eq('job_id', job.id).order('sort_order');
 
     const result = await candidateMatchPreview({

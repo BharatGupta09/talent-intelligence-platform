@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requirePage, requireJobOwnership } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { JobForm, type JobValues } from '../../job-form';
 
@@ -12,9 +12,9 @@ export default async function EditJob({ params }: { params: Promise<{ id: string
   const { id } = await params;
   const user = await requirePage('recruiter', 'admin');
   await requireJobOwnership(id);
-  const supabase = await createClient();
+  const db = await createClient();
 
-  const { data: job } = await supabase.from('jobs').select('*').eq('id', id).maybeSingle();
+  const { data: job } = await db.from('jobs').select('*').eq('id', id).maybeSingle();
   if (!job) notFound();
 
   const initial: JobValues = {

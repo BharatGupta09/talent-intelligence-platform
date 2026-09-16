@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "seed": "tsx --conditions=react-server scripts/seed.ts",
+    "seed": "tsx --conditions=react-server --env-file=.env.local scripts/seed.ts",
     "test:scoring": "tsx scripts/test-scoring.ts",
     "test:authz": "tsx scripts/test-authz.ts",
     "test:pdf": "tsx --conditions=react-server scripts/test-pdf.ts",

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireApplicationAccess, errorResponse } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { notifyUser } from '@/lib/ai/service';
 
 export const runtime = 'nodejs';
@@ -28,14 +28,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     const { id } = await params;
     const { user } = await requireApplicationAccess(id);
-    const supabase = await createClient();
+    const db = await createClient();
 
     const parsed = bodySchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
       return NextResponse.json({ error: 'A valid stage is required.' }, { status: 400 });
     }
 
-    const { data: current } = await supabase
+    const { data: current } = await db
       .from('applications')
       .select('stage, candidate_id, jobs(title)')
       .eq('id', id).single();
@@ -45,11 +45,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ ok: true, unchanged: true });
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from('applications').update({ stage: parsed.data.stage }).eq('id', id);
     if (error) throw error;
 
-    await supabase.from('application_events').insert({
+    await db.from('application_events').insert({
       application_id: id,
       actor_id: user.id,
       from_stage: current.stage,
@@ -59,7 +59,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     });
 
     // The candidate is told their stage moved, never why or by whom (§57).
-    const { data: candidate } = await supabase
+    const { data: candidate } = await db
       .from('candidate_profiles').select('user_id').eq('id', current.candidate_id).single();
 
     if (candidate) {

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requirePage, requireJobOwnership } from '@/lib/auth/guards';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/db/server';
 import { AppShell, PageHead } from '@/components/app-shell';
 import { Panel, EmptyState, ImportanceTag, Stat } from '@/components/ui';
 import { RankingTable, type Row } from './ranking-table';
@@ -14,20 +14,20 @@ export default async function JobWorkspace({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const user = await requirePage('recruiter', 'admin');
   await requireJobOwnership(id);
-  const supabase = await createClient();
+  const db = await createClient();
 
-  const { data: job } = await supabase.from('jobs').select('*').eq('id', id).maybeSingle();
+  const { data: job } = await db.from('jobs').select('*').eq('id', id).maybeSingle();
   if (!job) notFound();
 
-  const { data: requirements } = await supabase
+  const { data: requirements } = await db
     .from('job_requirements').select('id, label, kind, importance, detail')
     .eq('job_id', id).order('sort_order');
 
-  const { data: analysis } = await supabase
+  const { data: analysis } = await db
     .from('job_analyses').select('weights, rationale, model, created_at')
     .eq('job_id', id).order('spec_version', { ascending: false }).limit(1).maybeSingle();
 
-  const { data: apps } = await supabase
+  const { data: apps } = await db
     .from('applications')
     .select(`id, stage, screening_status, submitted_at,
              candidate_profiles(location, years_experience, profiles(full_name, email)),
